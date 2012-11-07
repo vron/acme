@@ -1,20 +1,19 @@
-
 // Package just modified from orginal package found at
 // http://code.google.com/p/rsc
+// Used to watch a directory and run a command when it changes (or one of the files in it)
 package main
 
 import (
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"os/exec"
 	"strings"
 	"sync"
-	//"syscall"
-	//"time"
 
-	"github.com/howeyc/fsnotify"
 	"code.google.com/p/goplan9/plan9/acme"
+	"github.com/howeyc/fsnotify"
 )
 
 var args []string
@@ -24,7 +23,12 @@ var needrun = make(chan bool, 1)
 func main() {
 	flag.Parse()
 	args = flag.Args()
-	
+	if len(args) < 1 {
+		fmt.Println(`Watch current dir and run the given command when something
+changes, thus need at least one argument`)
+		os.Exit(0)
+	}
+
 	var err error
 	win, err = acme.New()
 	if err != nil {
@@ -38,35 +42,34 @@ func main() {
 	go events()
 	go runner()
 	// Init new watcher 
-watcher, err := fsnotify.NewWatcher()
-if err != nil {
-    log.Fatal(err)  
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	go func() {
+		for {
+			select {
+			case _ = <-watcher.Event:
+				needrun <- true
+			case err := <-watcher.Error:
+				log.Fatal("error:", err)
+			}
+		}
+	}()
+
+	err = watcher.Watch(".")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// And now wait... ./watch go install
+	select {}
+
+	log.Println("I am dead now...")
 }
 
-go func() {
-    for {
-        select {
-        case ev := <-watcher.Event:
-            log.Println("event:", ev)
-	   needrun <- true
-        case err := <-watcher.Error:
-            log.Fatal("error:", err)
-        }
-    } 
-}()
-
-err = watcher.Watch(".") 
-if err != nil {
-    log.Fatal(err)
-} 
-
-// And now wait... ./watch go install
-select {}
-
-	log.Println("I am dead now...") 
-}
-
-func events() { 
+func events() {
 	for e := range win.EventChan() {
 		switch e.C2 {
 		case 'x', 'X': // execute
