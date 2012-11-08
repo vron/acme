@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"io/ioutil"
 
 	"code.google.com/p/goplan9/plan9/acme"
 	"github.com/howeyc/fsnotify"
@@ -19,6 +20,8 @@ import (
 var args []string
 var win *acme.Win
 var needrun = make(chan bool, 1)
+
+var recursive = flag.Bool("r", false, "Activate recursive checking of subdirs, currently only 2 levels")
 
 func main() {
 	flag.Parse()
@@ -41,12 +44,14 @@ changes, thus need at least one argument`)
 	needrun <- true
 	go events()
 	go runner()
-	// Init new watcher 
-	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		log.Fatal(err)
-	}
 
+	// Init new watcher
+		watcher, err := fsnotify.NewWatcher()
+		if err != nil {
+			log.Fatal(err)
+		}
+
+	// Start listening for these events
 	go func() {
 		for {
 			select {
@@ -57,11 +62,29 @@ changes, thus need at least one argument`)
 			}
 		}
 	}()
-
-	err = watcher.Watch(".")
-	if err != nil {
-		log.Fatal(err)
+	var rset func(int, int, string)
+	rset = func(curdepth, totdepth int, path string)   {
+		err = watcher.Watch(path)
+		
+		if err != nil {
+			log.Fatal(err)
+		}
+		if curdepth < totdepth {
+			curdepth++
+			files, er := ioutil.ReadDir(path)
+			if er != nil {
+				log.Fatal(er)
+			}
+			for _, v := range files {
+				if v.IsDir() {
+					rset(curdepth, totdepth, path + "/" + v.Name())
+				}
+			}
+		}
 	}
+	lvl := 0
+	if *recursive { lvl = 2}
+	rset(0,lvl,".")
 
 	// And now wait... ./watch go install
 	select {}
@@ -70,7 +93,7 @@ changes, thus need at least one argument`)
 }
 
 func events() {
-	for e := range win.EventChan() {
+	for e := range win.EventChan() { 
 		switch e.C2 {
 		case 'x', 'X': // execute
 			if string(e.Text) == "Get" {
